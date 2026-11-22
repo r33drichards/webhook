@@ -6,6 +6,7 @@ Hooks are defined as objects in the JSON or YAML hooks configuration file. Pleas
 
  * `id` - specifies the ID of your hook. This value is used to create the HTTP endpoint (http://yourserver:port/hooks/your-hook-id)
  * `execute-command` - specifies the command that should be executed when the hook is triggered
+ * `command-executor` - selects `process` (the default) or `wasm`. See [Running a WebAssembly hook](#running-a-webassembly-hook).
  * `command-working-directory` - specifies the working directory that will be used for the script when it's executed
  * `response-message` - specifies the string that will be returned to the hook initiator
  * `response-headers` - specifies the list of headers in format `{"name": "X-Example-Header", "value": "it works"}` that will be returned in HTTP response for the hook
@@ -26,3 +27,32 @@ Hooks are defined as objects in the JSON or YAML hooks configuration file. Pleas
 
 ## Examples
 Check out [Hook examples page](Hook-Examples.md) for more complex examples of hooks.
+
+## Running a WebAssembly hook
+
+Install Wasmer 7.5 on the webhook server's PATH. Set `command-executor` to
+`wasm` and `execute-command` to a local WASI or WASIX module. The executor
+runs the module with networking and forwards the hook process environment.
+Use modules you trust with those permissions. An explicit
+`command-working-directory` makes that directory available to the guest at
+`/work` and sets the guest working directory for WASIX modules.
+With `pass-file-to-command`, the executor mounts a temporary directory for each
+request at `/hook-input` and sets the configured environment variables to paths
+inside that directory. The executor removes the directory after the module exits.
+
+This hook runs wrev's WASIX build against a specific pull request. Set
+`OPENAI_MODEL`, `WREV_GITHUB_TOKEN`, and `CHATGPT_ACCESS_TOKEN` in the
+webhook server's environment.
+
+```json
+{
+  "id": "wrev",
+  "command-executor": "wasm",
+  "execute-command": "/opt/wrev/wrev.wasm",
+  "pass-arguments-to-command": [
+    {"source": "string", "name": "review"},
+    {"source": "string", "name": "owner/repo"},
+    {"source": "string", "name": "123"}
+  ]
+}
+```

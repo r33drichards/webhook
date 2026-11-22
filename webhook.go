@@ -10,7 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -563,33 +563,26 @@ func hookHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHook(h *hook.Hook, r *hook.Request) (string, error) {
-	var errors []error
-
-	// check the command exists
-	var lookpath string
-	if filepath.IsAbs(h.ExecuteCommand) || h.CommandWorkingDirectory == "" {
-		lookpath = h.ExecuteCommand
-	} else {
-		lookpath = filepath.Join(h.CommandWorkingDirectory, h.ExecuteCommand)
+	executor, err := hookExecutor(h.CommandExecutor)
+	if err != nil {
+		log.Printf("[%s] %s", r.ID, err)
+		return "", err
 	}
 
-	cmdPath, err := exec.LookPath(lookpath)
+	cmdPath, err := executor.Resolve(h.ExecuteCommand, h.CommandWorkingDirectory)
 	if err != nil {
 		log.Printf("[%s] error in %s", r.ID, err)
 
 		// check if parameters specified in execute-command by mistake
-		if strings.IndexByte(h.ExecuteCommand, ' ') != -1 {
-			s := strings.Fields(h.ExecuteCommand)[0]
+		if fields := strings.Fields(h.ExecuteCommand); len(fields) > 1 {
+			s := fields[0]
 			log.Printf("[%s] use 'pass-arguments-to-command' to specify args for '%s'", r.ID, s)
 		}
 
 		return "", err
 	}
 
-	cmd := exec.Command(cmdPath)
-	cmd.Dir = h.CommandWorkingDirectory
-
-	cmd.Args, errors = h.ExtractCommandArguments(r)
+	args, errors := h.ExtractCommandArguments(r)
 	for _, err := range errors {
 		log.Printf("[%s] error extracting command arguments: %s\n", r.ID, err)
 	}
@@ -607,46 +600,60 @@ func handleHook(h *hook.Hook, r *hook.Request) (string, error) {
 		log.Printf("[%s] error extracting command arguments for file: %s\n", r.ID, err)
 	}
 
-	for i := range files {
-		tmpfile, err := ioutil.TempFile(h.CommandWorkingDirectory, files[i].EnvName)
+	fileDir := h.CommandWorkingDirectory
+	var inputDir string
+	if h.CommandExecutor == "wasm" && len(files) > 0 {
+		inputDir, err = os.MkdirTemp("", "webhook-input-")
+		if err != nil {
+			log.Printf("[%s] error creating input directory: %s", r.ID, err)
+			return "", err
+		}
+		defer func() {
+			if err := os.RemoveAll(inputDir); err != nil {
+				log.Printf("[%s] error removing input directory %s: %s", r.ID, inputDir, err)
+			}
+		}()
+		fileDir = inputDir
+	}
+	for _, file := range files {
+		tmpfile, err := os.CreateTemp(fileDir, file.EnvName)
 		if err != nil {
 			log.Printf("[%s] error creating temp file [%s]", r.ID, err)
 			continue
 		}
-		log.Printf("[%s] writing env %s file %s", r.ID, files[i].EnvName, tmpfile.Name())
-		if _, err := tmpfile.Write(files[i].Data); err != nil {
-			log.Printf("[%s] error writing file %s [%s]", r.ID, tmpfile.Name(), err)
+		filename := tmpfile.Name()
+		if inputDir == "" {
+			defer func(name string) {
+				if err := os.Remove(name); err != nil {
+					log.Printf("[%s] error removing file %s [%s]", r.ID, name, err)
+				}
+			}(filename)
+		}
+		log.Printf("[%s] writing env %s file %s", r.ID, file.EnvName, filename)
+		_, writeErr := tmpfile.Write(file.Data)
+		closeErr := tmpfile.Close()
+		if writeErr != nil {
+			log.Printf("[%s] error writing file %s [%s]", r.ID, filename, writeErr)
 			continue
 		}
-		if err := tmpfile.Close(); err != nil {
-			log.Printf("[%s] error closing file %s [%s]", r.ID, tmpfile.Name(), err)
+		if closeErr != nil {
+			log.Printf("[%s] error closing file %s [%s]", r.ID, filename, closeErr)
 			continue
 		}
-
-		files[i].File = tmpfile
-		envs = append(envs, files[i].EnvName+"="+tmpfile.Name())
+		if inputDir != "" {
+			filename = path.Join(wasmInputDir, filepath.Base(filename))
+		}
+		envs = append(envs, file.EnvName+"="+filename)
 	}
 
-	cmd.Env = append(os.Environ(), envs...)
+	log.Printf("[%s] executing %s (%s) with arguments %q using %s as cwd\n", r.ID, h.ExecuteCommand, cmdPath, args, h.CommandWorkingDirectory)
 
-	log.Printf("[%s] executing %s (%s) with arguments %q and environment %s using %s as cwd\n", r.ID, h.ExecuteCommand, cmd.Path, cmd.Args, envs, cmd.Dir)
-
-	out, err := cmd.CombinedOutput()
+	out, err := executor.CombinedOutput(cmdPath, args, h.CommandWorkingDirectory, append(os.Environ(), envs...), inputDir)
 
 	log.Printf("[%s] command output: %s\n", r.ID, out)
 
 	if err != nil {
 		log.Printf("[%s] error occurred: %+v\n", r.ID, err)
-	}
-
-	for i := range files {
-		if files[i].File != nil {
-			log.Printf("[%s] removing file %s\n", r.ID, files[i].File.Name())
-			err := os.Remove(files[i].File.Name())
-			if err != nil {
-				log.Printf("[%s] error removing file %s [%s]", r.ID, files[i].File.Name(), err)
-			}
-		}
 	}
 
 	log.Printf("[%s] finished handling %s\n", r.ID, h.ID)
