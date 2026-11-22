@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -29,6 +30,7 @@ const (
 )
 
 var (
+	wrevComponent      = flag.String("wrev-component", "", "enable GitHub review sessions with this wrev WebAssembly component")
 	ip                 = flag.String("ip", "0.0.0.0", "ip the webhook should serve hooks on")
 	port               = flag.Int("port", 9000, "port the webhook should serve hooks on")
 	verbose            = flag.Bool("verbose", false, "show verbose output")
@@ -231,7 +233,7 @@ func main() {
 
 	hooksFiles = newHooksFiles
 
-	if !*verbose && !*noPanic && lenLoadedHooks() == 0 {
+	if *wrevComponent == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
 		log.SetOutput(os.Stdout)
 		log.Fatalln("couldn't load any hooks from file!\naborting webhook execution since the -verbose flag is set to false.\nIf, for some reason, you want webhook to start without the hooks, either use -verbose flag, or -nopanic")
 	}
@@ -285,6 +287,16 @@ func main() {
 		fmt.Fprint(w, "OK")
 	})
 
+	if *wrevComponent != "" {
+		reviews, err := openReviewService(*wrevComponent)
+		if err != nil {
+			log.Fatalf("could not start review service: %s", err)
+		}
+		r.HandleFunc("/github/webhook", reviews.githubWebhook).Methods(http.MethodPost)
+		r.HandleFunc("/admin/chatgpt-credentials", reviews.credentials.put).Methods(http.MethodPut)
+		r.HandleFunc("/admin/reviews", reviews.list).Methods(http.MethodGet)
+		go reviews.work()
+	}
 	r.HandleFunc(hooksURL, hookHandler)
 
 	// Create common HTTP server settings
@@ -648,7 +660,7 @@ func handleHook(h *hook.Hook, r *hook.Request) (string, error) {
 
 	log.Printf("[%s] executing %s (%s) with arguments %q using %s as cwd\n", r.ID, h.ExecuteCommand, cmdPath, args, h.CommandWorkingDirectory)
 
-	out, err := executor.CombinedOutput(cmdPath, args, h.CommandWorkingDirectory, append(os.Environ(), envs...), inputDir)
+	out, err := executor.CombinedOutput(context.Background(), cmdPath, args, h.CommandWorkingDirectory, append(os.Environ(), envs...), inputDir)
 
 	log.Printf("[%s] command output: %s\n", r.ID, out)
 
@@ -736,7 +748,7 @@ func removeHooks(hooksFilePath string) {
 
 	log.Printf("removed %d hook(s) that were loaded from file %s\n", removedHooksCount, hooksFilePath)
 
-	if !*verbose && !*noPanic && lenLoadedHooks() == 0 {
+	if *wrevComponent == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
 		log.SetOutput(os.Stdout)
 		log.Fatalln("couldn't load any hooks from file!\naborting webhook execution since the -verbose flag is set to false.\nIf, for some reason, you want webhook to run without the hooks, either use -verbose flag, or -nopanic")
 	}
