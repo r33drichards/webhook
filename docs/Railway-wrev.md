@@ -14,6 +14,7 @@ mounted at `/data` and run one replica. Set the health check to `/`.
 | `WREV_CREDENTIAL_ADMIN_TOKEN` | Separate random bearer token, minimum 32 characters |
 | `WREV_CREDENTIAL_ENCRYPTION_KEY` | Separate key of 32 random bytes encoded as 64 hex characters |
 | `WREV_GITHUB_TOKEN` | GitHub token with read access to Contents and Pull requests |
+| `WREV_GITHUB_COMMENT_TOKEN` | Optional GitHub token with Pull requests write access on reviewed repositories |
 | `OPENAI_MODEL` | Model slug from `wrev models` |
 
 Configure a GitHub App webhook installed on all owned repositories, or add
@@ -22,6 +23,12 @@ repository webhooks individually. Send JSON **Pull requests** events to
 `wrev` creates a queued session. Removing it cancels the queued or running
 session. Reapplying it creates a new session. Identical GitHub deliveries are
 deduplicated. Each review can run for up to ten minutes.
+
+Set `WREV_GITHUB_COMMENT_TOKEN` to post a start comment and update it with the
+findings or terminal status for that review session. The token can be scoped
+to the repositories where Wrev should comment. Review reads still use
+`WREV_GITHUB_TOKEN`. Comment API errors appear in the worker logs, and the
+review result remains available in `/admin/reviews`.
 
 To register repository webhooks in bulk, use an authenticated `gh` CLI
 credential with permission to administer repository webhooks. Load

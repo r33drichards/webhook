@@ -36,6 +36,7 @@ var (
 type reviewService struct {
 	db          *sql.DB
 	credentials *reviewCredentials
+	comments    *reviewComments
 	binary      string
 	data        string
 	owner       string
@@ -78,6 +79,7 @@ func openReviewService(binary string) (*reviewService, error) {
 		return nil, err
 	}
 	db, err := openReviewDB(filepath.Join(data, "queue.sqlite"), `
+		CREATE TABLE IF NOT EXISTS review_comments (review_id INTEGER PRIMARY KEY, comment_id INTEGER NOT NULL);
 		CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY);
 		CREATE TABLE IF NOT EXISTS reviews (
 			id INTEGER PRIMARY KEY, repository TEXT NOT NULL, number INTEGER NOT NULL, head TEXT NOT NULL,
@@ -95,7 +97,7 @@ func openReviewService(binary string) (*reviewService, error) {
 		label = "wrev"
 	}
 	return &reviewService{
-		db: db, credentials: credentials, binary: binary, data: data, owner: strings.ToLower(owner),
+		db: db, credentials: credentials, comments: newReviewComments(os.Getenv("WREV_GITHUB_COMMENT_TOKEN")), binary: binary, data: data, owner: strings.ToLower(owner),
 		label: label, signingKey: []byte(secret), wake: make(chan struct{}, 1), cancel: make(map[int64]context.CancelFunc),
 	}, nil
 }
@@ -248,6 +250,7 @@ func (s *reviewService) work() {
 			time.Sleep(time.Second)
 			continue
 		}
+		s.notifyReview(ctx, job, "started", "")
 		result, err := s.run(ctx, job)
 		state := "completed"
 		if err != nil {
@@ -257,12 +260,42 @@ func (s *reviewService) work() {
 		s.mu.Lock()
 		s.cancel[job.id]()
 		delete(s.cancel, job.id)
-		_, err = s.db.Exec("UPDATE reviews SET state = ?, result = NULLIF(?, '') WHERE id = ? AND state = 'running'",
+		updated, err := s.db.Exec("UPDATE reviews SET state = ?, result = NULLIF(?, '') WHERE id = ? AND state = 'running'",
 			state, result, job.id)
+		if err == nil {
+			var count int64
+			count, err = updated.RowsAffected()
+			if err == nil && count == 0 {
+				err = s.db.QueryRow("SELECT state FROM reviews WHERE id = ?", job.id).Scan(&state)
+			}
+		}
 		s.mu.Unlock()
 		if err != nil {
 			reviewLog.Printf("could not persist result for review %d: %v", job.id, err)
+			continue
 		}
+		s.notifyReview(context.Background(), job, state, result)
+	}
+}
+
+func (s *reviewService) notifyReview(ctx context.Context, job reviewJob, state, result string) {
+	if s.comments == nil {
+		return
+	}
+	var commentID int64
+	err := s.db.QueryRow("SELECT comment_id FROM review_comments WHERE review_id = ?", job.id).Scan(&commentID)
+	if err == nil && state == "started" {
+		return
+	}
+	if err == nil || errors.Is(err, sql.ErrNoRows) {
+		var id int64
+		id, err = s.comments.send(ctx, job, commentID, reviewCommentBody(job, state, result))
+		if err == nil && commentID == 0 {
+			_, err = s.db.Exec("INSERT INTO review_comments (review_id, comment_id) VALUES (?, ?)", job.id, id)
+		}
+	}
+	if err != nil {
+		reviewLog.Printf("could not update PR comment for review %d: %v", job.id, err)
 	}
 }
 
