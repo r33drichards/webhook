@@ -14,6 +14,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/gofrs/uuid/v5 v5.0.0
 	github.com/gorilla/mux v1.8.1
+	github.com/mattn/go-sqlite3 v1.14.32
 	golang.org/x/sys v0.18.0
 )
 

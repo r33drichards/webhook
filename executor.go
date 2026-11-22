@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +14,7 @@ const wasmInputDir = "/hook-input"
 // Exec resolves a configured command and runs it with its full argv and environment.
 type Exec interface {
 	Resolve(command, dir string) (string, error)
-	CombinedOutput(path string, args []string, dir string, env []string, inputDir string) ([]byte, error)
+	CombinedOutput(ctx context.Context, path string, args []string, dir string, env []string, inputDir string) ([]byte, error)
 }
 
 func hookExecutor(name string) (Exec, error) {
@@ -40,8 +41,8 @@ func (processExec) Resolve(command, dir string) (string, error) {
 	return exec.LookPath(commandPath(command, dir))
 }
 
-func (processExec) CombinedOutput(path string, args []string, dir string, env []string, _ string) ([]byte, error) {
-	cmd := exec.Command(path)
+func (processExec) CombinedOutput(ctx context.Context, path string, args []string, dir string, env []string, _ string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, path)
 	cmd.Args = args
 	cmd.Dir = dir
 	cmd.Env = env
@@ -68,7 +69,7 @@ func (wasmExec) Resolve(command, dir string) (string, error) {
 	return path, nil
 }
 
-func (wasmExec) CombinedOutput(path string, args []string, dir string, env []string, inputDir string) ([]byte, error) {
+func (wasmExec) CombinedOutput(ctx context.Context, path string, args []string, dir string, env []string, inputDir string) ([]byte, error) {
 	// Use the server's PATH to locate Wasmtime, just as the process executor
 	// resolves executables before applying request-derived environment values.
 	runtimeArgs := []string{"run", "-S", "inherit-env"}
@@ -107,7 +108,7 @@ func (wasmExec) CombinedOutput(path string, args []string, dir string, env []str
 	runtimeArgs = append(runtimeArgs, path)
 	// Wasmtime sets the guest's argv[0] to the module name.
 	runtimeArgs = append(runtimeArgs, args[1:]...)
-	cmd := exec.Command("wasmtime", runtimeArgs...)
+	cmd := exec.CommandContext(ctx, "wasmtime", runtimeArgs...)
 	cmd.Dir = dir
 	cmd.Env = env
 	return cmd.CombinedOutput()
