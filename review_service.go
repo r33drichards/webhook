@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -34,7 +35,7 @@ var (
 type reviewService struct {
 	db          *sql.DB
 	credentials *reviewCredentials
-	component   string
+	binary      string
 	data        string
 	owner       string
 	label       string
@@ -57,8 +58,8 @@ func openReviewDB(path string, schema string) (*sql.DB, error) {
 	return db, nil
 }
 
-func openReviewService(component string) (*reviewService, error) {
-	module, err := (wasmExec{}).Resolve(component, "")
+func openReviewService(binary string) (*reviewService, error) {
+	binary, err := exec.LookPath(binary)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func openReviewService(component string) (*reviewService, error) {
 	if data == "" || !reviewRepo.MatchString(owner) || len(secret) < 32 {
 		return nil, errors.New("set WREV_DATA_DIR, WREV_REPOSITORY_OWNER, and a strong WREV_WEBHOOK_SECRET")
 	}
-	if err := os.MkdirAll(filepath.Join(data, "sessions"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(data, "sessions-native"), 0700); err != nil {
 		return nil, err
 	}
 	credentials, err := openReviewCredentials(filepath.Join(data, "credentials.sqlite"))
@@ -93,7 +94,7 @@ func openReviewService(component string) (*reviewService, error) {
 		label = "wrev"
 	}
 	return &reviewService{
-		db: db, credentials: credentials, component: module, data: data, owner: strings.ToLower(owner),
+		db: db, credentials: credentials, binary: binary, data: data, owner: strings.ToLower(owner),
 		label: label, signingKey: []byte(secret), wake: make(chan struct{}, 1), cancel: make(map[int64]context.CancelFunc),
 	}, nil
 }
@@ -272,11 +273,16 @@ func (s *reviewService) run(ctx context.Context, job reviewJob) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(s.data, "sessions", strconv.FormatInt(job.id, 10))
+	dir := filepath.Join(s.data, "sessions-native", strconv.FormatInt(job.id, 10))
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
-	env := []string{"WREV_SESSION_DIR=/work", "WREV_EXPECTED_HEAD=" + job.head,
+	scratch, err := os.MkdirTemp("", "wrev-checkout-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(scratch)
+	env := []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + scratch, "WREV_SESSION_DIR=" + dir, "WREV_EXPECTED_HEAD=" + job.head,
 		"WREV_REQUIRED_LABEL=" + s.label, "CHATGPT_ACCESS_TOKEN=" + token}
 	for _, key := range []string{"XDG_CACHE_HOME", "WREV_GITHUB_TOKEN", "OPENAI_MODEL",
 		"WREV_MODEL_TIMEOUT_SECS", "WREV_GITHUB_TIMEOUT_SECS", "WREV_SCRIPT_TIMEOUT_SECS",
@@ -285,9 +291,20 @@ func (s *reviewService) run(ctx context.Context, job reviewJob) (string, error) 
 			env = append(env, key+"="+value)
 		}
 	}
-	args := []string{s.component, "review", job.repository, strconv.FormatInt(job.number, 10)}
-	output, err := (wasmExec{}).CombinedOutput(ctx, s.component, args, dir, env, "")
+	cmd := exec.CommandContext(ctx, s.binary, "review", job.repository, strconv.FormatInt(job.number, 10))
+	cmd.Dir = dir
+	cmd.Env = env
+	configureReviewCancellation(cmd)
+	output, err := cmd.Output()
 	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			message := strings.TrimSpace(string(exit.Stderr))
+			if len(message) > 2048 {
+				message = message[:2048]
+			}
+			return "", fmt.Errorf("wrev process: %w: %s", err, message)
+		}
 		return "", fmt.Errorf("wrev process: %w", err)
 	}
 	if !json.Valid(output) {

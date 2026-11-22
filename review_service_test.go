@@ -26,11 +26,11 @@ func reviewTestService(t *testing.T) *reviewService {
 	t.Setenv("WREV_WEBHOOK_SECRET", strings.Repeat("w", 32))
 	t.Setenv("WREV_CREDENTIAL_ADMIN_TOKEN", strings.Repeat("a", 32))
 	t.Setenv("WREV_CREDENTIAL_ENCRYPTION_KEY", strings.Repeat("b", 64))
-	module := filepath.Join(dir, "wrev.wasm")
-	if err := os.WriteFile(module, nil, 0600); err != nil {
+	binary := filepath.Join(dir, "wrev")
+	if err := os.WriteFile(binary, nil, 0700); err != nil {
 		t.Fatal(err)
 	}
-	service, err := openReviewService(module)
+	service, err := openReviewService(binary)
 	if err != nil {
 		t.Fatal(err)
 	}
