@@ -5,7 +5,7 @@ RUN go build -trimpath -o /webhook .
 
 FROM rust:1.100-bookworm AS reviewer
 RUN apt-get update && apt-get install -y --no-install-recommends cmake && rm -rf /var/lib/apt/lists/*
-ARG WREV_REVISION=157641582a542e9ef5ff73cff575cf58f83ff017
+ARG WREV_REVISION=d8713736595c2067796c72d00b91db63db28fab4
 RUN echo "$WREV_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
     git init /wrev && git -C /wrev fetch --depth 1 https://github.com/r33drichards/wrev.git "$WREV_REVISION" && \
     git -C /wrev checkout --detach FETCH_HEAD && test "$(git -C /wrev rev-parse HEAD)" = "$WREV_REVISION"
@@ -13,7 +13,7 @@ WORKDIR /wrev
 RUN cargo build --locked --release --features sqlite-backend --bin wrev
 
 FROM debian:bookworm-slim
-ARG WREV_REVISION=157641582a542e9ef5ff73cff575cf58f83ff017
+ARG WREV_REVISION=d8713736595c2067796c72d00b91db63db28fab4
 LABEL io.wrev.revision=$WREV_REVISION
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
