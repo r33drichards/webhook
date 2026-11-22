@@ -27,6 +27,7 @@ import (
 const reviewTimeout = 10 * time.Minute
 
 var (
+	reviewLog  = log.New(os.Stderr, "", log.LstdFlags)
 	reviewRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 	reviewSHA  = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
 	deliveryID = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
@@ -159,7 +160,7 @@ func (s *reviewService) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	accepted, err := s.apply(delivery, repo, event)
 	if err != nil {
-		log.Printf("could not persist review event: %v", err)
+		reviewLog.Printf("could not persist review event: %v", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -243,7 +244,7 @@ func (s *reviewService) work() {
 			continue
 		}
 		if err != nil {
-			log.Printf("could not claim review: %v", err)
+			reviewLog.Printf("could not claim review: %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -251,16 +252,16 @@ func (s *reviewService) work() {
 		state := "completed"
 		if err != nil {
 			state = "failed"
-			log.Printf("review %d did not finish: %v", job.id, err)
+			reviewLog.Printf("review %d did not finish: %v", job.id, err)
 		}
 		s.mu.Lock()
 		s.cancel[job.id]()
 		delete(s.cancel, job.id)
-		_, err = s.db.Exec("UPDATE reviews SET state = ?, result = ? WHERE id = ? AND state = 'running'",
+		_, err = s.db.Exec("UPDATE reviews SET state = ?, result = NULLIF(?, '') WHERE id = ? AND state = 'running'",
 			state, result, job.id)
 		s.mu.Unlock()
 		if err != nil {
-			log.Printf("could not persist result for review %d: %v", job.id, err)
+			reviewLog.Printf("could not persist result for review %d: %v", job.id, err)
 		}
 	}
 }
@@ -318,7 +319,7 @@ func (s *reviewService) list(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	rows, err := s.db.Query(`SELECT id, repository, number, head, state, created_at, COALESCE(result, 'null')
+	rows, err := s.db.Query(`SELECT id, repository, number, head, state, created_at, COALESCE(NULLIF(result, ''), 'null')
 		FROM reviews ORDER BY id DESC LIMIT 100`)
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
