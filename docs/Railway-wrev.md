@@ -1,7 +1,7 @@
 # wrev on Railway
 
 Deploy this repository using its Dockerfile. Set `WREV_REVISION` to a wrev
-commit that includes the WASI Preview 2 SQLite backend. Add a Railway volume
+commit that includes the native Git snapshot reviewer. Add a Railway volume
 mounted at `/data` and run one replica. Set the health check to `/`.
 
 | Railway variable | Value |
@@ -39,8 +39,12 @@ is stored. `GET /admin/reviews` with the same authorization lists recent
 sessions and their results.
 
 The volume holds a durable queue in `queue.sqlite`, review checkpoints in
-`sessions/<id>/review.sqlite`, and the encrypted ChatGPT grant in
+`sessions-native/<id>/review.sqlite`, and the encrypted ChatGPT grant in
 `credentials.sqlite`. On restart, interrupted sessions resume from their last
 checkpoint when the PR is still eligible. A checkpoint that records an
 unfinished tool call requires a new session. Keep the encryption key available
 across deployments and store backups of the volume privately.
+
+Before switching from the Wasmtime worker, drain queued and running reviews.
+The previous checkpoint files remain in `sessions/`. The native reviewer uses
+a different prompt and tool set, so it starts checkpoints in `sessions-native/`.

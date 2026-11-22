@@ -30,7 +30,7 @@ const (
 )
 
 var (
-	wrevComponent      = flag.String("wrev-component", "", "enable GitHub review sessions with this wrev WebAssembly component")
+	wrevBinary         = flag.String("wrev-binary", "", "enable GitHub review sessions with this native wrev executable")
 	ip                 = flag.String("ip", "0.0.0.0", "ip the webhook should serve hooks on")
 	port               = flag.Int("port", 9000, "port the webhook should serve hooks on")
 	verbose            = flag.Bool("verbose", false, "show verbose output")
@@ -233,7 +233,7 @@ func main() {
 
 	hooksFiles = newHooksFiles
 
-	if *wrevComponent == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
+	if *wrevBinary == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
 		log.SetOutput(os.Stdout)
 		log.Fatalln("couldn't load any hooks from file!\naborting webhook execution since the -verbose flag is set to false.\nIf, for some reason, you want webhook to start without the hooks, either use -verbose flag, or -nopanic")
 	}
@@ -287,8 +287,8 @@ func main() {
 		fmt.Fprint(w, "OK")
 	})
 
-	if *wrevComponent != "" {
-		reviews, err := openReviewService(*wrevComponent)
+	if *wrevBinary != "" {
+		reviews, err := openReviewService(*wrevBinary)
 		if err != nil {
 			log.Fatalf("could not start review service: %s", err)
 		}
@@ -748,7 +748,7 @@ func removeHooks(hooksFilePath string) {
 
 	log.Printf("removed %d hook(s) that were loaded from file %s\n", removedHooksCount, hooksFilePath)
 
-	if *wrevComponent == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
+	if *wrevBinary == "" && !*verbose && !*noPanic && lenLoadedHooks() == 0 {
 		log.SetOutput(os.Stdout)
 		log.Fatalln("couldn't load any hooks from file!\naborting webhook execution since the -verbose flag is set to false.\nIf, for some reason, you want webhook to run without the hooks, either use -verbose flag, or -nopanic")
 	}
