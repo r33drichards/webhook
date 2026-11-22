@@ -1,12 +1,15 @@
 # wrev on Railway
 
-Deploy this repository using its Dockerfile. Set `WREV_REVISION` to a wrev
-commit that includes the native Git snapshot reviewer. Add a Railway volume
-mounted at `/data` and run one replica. Set the health check to `/`.
+Railway follows `r33drichards/webhook` on `master` and builds the Dockerfile
+after each push. The Dockerfile pins the native reviewer to a merged Wrev SHA.
+Leave the Railway `WREV_REVISION` variable unset so the committed pin controls
+the build. The Wrev Actions workflow proposes pin updates as worker PRs.
+Merge the pin PR to promote that revision to production.
+
+Keep one replica, the existing volume at `/data`, and the `/` health check.
 
 | Railway variable | Value |
 | --- | --- |
-| `WREV_REVISION` | Build-time wrev commit |
 | `WREV_DATA_DIR` | `/data` |
 | `WREV_REPOSITORY_OWNER` | GitHub user or organization login |
 | `WREV_LABEL` | Optional, defaults to `wrev` |
