@@ -4,7 +4,7 @@ COPY . .
 RUN go build -trimpath -o /webhook .
 
 FROM rust:1.100-bookworm AS component
-ARG WREV_REVISION=dd942d7697685747a50add18052a0977385b2c8f
+ARG WREV_REVISION=fdc467f134d8e07686fe8dfc0cd66fc892ad9415
 RUN test -n "$WREV_REVISION" && \
     git init /wrev && git -C /wrev fetch --depth 1 https://github.com/r33drichards/wrev.git "$WREV_REVISION" && \
     git -C /wrev checkout --detach FETCH_HEAD
