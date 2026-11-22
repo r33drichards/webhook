@@ -23,6 +23,13 @@ repository webhooks individually. Send JSON **Pull requests** events to
 session. Reapplying it creates a new session. Identical GitHub deliveries are
 deduplicated. Each review can run for up to ten minutes.
 
+To register repository webhooks in bulk, use an authenticated `gh` CLI
+credential with permission to administer repository webhooks. Load
+`WREV_WEBHOOK_SECRET` into the shell from your secret store and run
+`python3 scripts/register-wrev-webhooks.py https://<domain>/github/webhook`.
+The script scopes registration to the authenticated user's owned, active
+repositories and reuses any webhook already pointed at the same URL.
+
 Use `PUT /admin/chatgpt-credentials` with `Authorization: Bearer <admin-token>`
 to store a grant. The JSON body contains `access_token` and `expires_at` in Unix
 seconds. Supply both `refresh_token` and the issued `client_id` to enable renewal.
