@@ -104,3 +104,18 @@ func TestSQLiteReviewCredentials(t *testing.T) {
 		t.Fatalf("could not restore encrypted credentials: %v", err)
 	}
 }
+
+func TestReviewListIncludesFailedRowsWithoutResults(t *testing.T) {
+	service := reviewTestService(t)
+	_, err := service.db.Exec("INSERT INTO reviews (repository, number, head, state, result) VALUES ('example/project', 1, 'test', 'failed', '')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/admin/reviews", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
+	response := httptest.NewRecorder()
+	service.list(response, req)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"result":null`) {
+		t.Fatalf("expected failed review with a null result, got %d %q", response.Code, response.Body.String())
+	}
+}
