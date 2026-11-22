@@ -30,17 +30,17 @@ Check out [Hook examples page](Hook-Examples.md) for more complex examples of ho
 
 ## Running a WebAssembly hook
 
-Install Wasmer 7.5 on the webhook server's PATH. Set `command-executor` to
-`wasm` and `execute-command` to a local WASI or WASIX module. The executor
-runs the module with networking and forwards the hook process environment.
+Install Wasmtime 51 on the webhook server's PATH. Set `command-executor` to
+`wasm` and `execute-command` to a local WASI Preview 1 module or Preview 2 component. The executor
+enables WASI HTTP for components and forwards the hook process environment.
 Use modules you trust with those permissions. An explicit
 `command-working-directory` makes that directory available to the guest at
-`/work` and sets the guest working directory for WASIX modules.
+`/work` and sets the initial working directory for Preview 2 components.
 With `pass-file-to-command`, the executor mounts a temporary directory for each
 request at `/hook-input` and sets the configured environment variables to paths
 inside that directory. The executor removes the directory after the module exits.
 
-This hook runs wrev's WASIX build against a specific pull request. Set
+This hook runs wrev's `wasm32-wasip2` build against a specific pull request. Set
 `OPENAI_MODEL`, `WREV_GITHUB_TOKEN`, and `CHATGPT_ACCESS_TOKEN` in the
 webhook server's environment.
 

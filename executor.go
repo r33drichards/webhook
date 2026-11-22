@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,27 +69,45 @@ func (wasmExec) Resolve(command, dir string) (string, error) {
 }
 
 func (wasmExec) CombinedOutput(path string, args []string, dir string, env []string, inputDir string) ([]byte, error) {
-	// Use the server's PATH to locate Wasmer, just as the process executor
+	// Use the server's PATH to locate Wasmtime, just as the process executor
 	// resolves executables before applying request-derived environment values.
-	runtimeArgs := []string{"run", "--no-tty", "--net", "--forward-host-env"}
+	runtimeArgs := []string{"run", "-S", "inherit-env"}
+	// Only components can import WASI HTTP. Wasmtime rejects that flag for
+	// core modules, including WASI Preview 1 commands.
+	module, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	var header [8]byte
+	_, err = io.ReadFull(module, header[:])
+	closeErr := module.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read WebAssembly header: %w", err)
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if header == [8]byte{0, 'a', 's', 'm', 0x0d, 0, 1, 0} {
+		runtimeArgs = append(runtimeArgs, "-S", "http")
+	}
 	if dir != "" {
 		absoluteDir, err := filepath.Abs(dir)
 		if err != nil {
 			return nil, err
 		}
-		runtimeArgs = append(runtimeArgs, "--volume", absoluteDir+":/work", "--cwd", "/work")
+		runtimeArgs = append(runtimeArgs, "--dir", absoluteDir+"::/work", "-S", "cwd=/work")
 	}
 	if inputDir != "" {
 		absoluteInputDir, err := filepath.Abs(inputDir)
 		if err != nil {
 			return nil, err
 		}
-		runtimeArgs = append(runtimeArgs, "--volume", absoluteInputDir+":"+wasmInputDir)
+		runtimeArgs = append(runtimeArgs, "--dir", absoluteInputDir+"::"+wasmInputDir)
 	}
-	runtimeArgs = append(runtimeArgs, path, "--")
-	// Wasmer sets the guest's argv[0] to the module name.
+	runtimeArgs = append(runtimeArgs, path)
+	// Wasmtime sets the guest's argv[0] to the module name.
 	runtimeArgs = append(runtimeArgs, args[1:]...)
-	cmd := exec.Command("wasmer", runtimeArgs...)
+	cmd := exec.Command("wasmtime", runtimeArgs...)
 	cmd.Dir = dir
 	cmd.Env = env
 	return cmd.CombinedOutput()
