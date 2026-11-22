@@ -150,3 +150,30 @@ func TestReviewCommentsReuseSessionComment(t *testing.T) {
 		t.Fatalf("expected findings rendered as plain code: %q", body)
 	}
 }
+
+func TestCompletedReviewRemovesOnlyItsTriggerLabel(t *testing.T) {
+	service := reviewTestService(t)
+	service.label = "review/auto"
+	requests := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	service.comments = newReviewComments("test-comment-token")
+	service.comments.api = server.URL
+	if _, err := service.db.Exec(`INSERT INTO reviews (id, repository, number, head, state)
+		VALUES (1, 'example/project', 14, 'test', 'completed'), (2, 'example/project', 14, 'test', 'completed')`); err != nil {
+		t.Fatal(err)
+	}
+	job := reviewJob{id: 1, repository: "example/project", number: 14}
+	service.removeCompletedLabel(job)
+	job.id = 2
+	service.removeCompletedLabel(job)
+	if len(requests) != 1 {
+		t.Fatalf("expected exactly one label removal, got %d", len(requests))
+	}
+	if request := <-requests; request != "DELETE /repos/example/project/issues/14/labels/review%2Fauto" {
+		t.Fatalf("unexpected label removal request: %s", request)
+	}
+}
