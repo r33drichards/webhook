@@ -119,3 +119,34 @@ func TestReviewListIncludesFailedRowsWithoutResults(t *testing.T) {
 		t.Fatalf("expected failed review with a null result, got %d %q", response.Code, response.Body.String())
 	}
 }
+
+func TestReviewCommentsReuseSessionComment(t *testing.T) {
+	service := reviewTestService(t)
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-comment-token" {
+			t.Error("missing comment credential")
+		}
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusCreated)
+		}
+		fmt.Fprint(w, `{"id":42}`)
+	}))
+	defer server.Close()
+	service.comments = newReviewComments("test-comment-token")
+	service.comments.api = server.URL
+	job := reviewJob{id: 1, repository: "example/project", number: 14, head: strings.Repeat("1", 40)}
+	service.notifyReview(context.Background(), job, "started", "")
+	service.notifyReview(context.Background(), job, "started", "")
+	result := `{"findings":[{"file":"src/main.rs","start_line":3,"end_line":4,"message":"First line\n@someone <img>"}]}`
+	service.notifyReview(context.Background(), job, "completed", result)
+	want := "POST /repos/example/project/issues/14/comments,PATCH /repos/example/project/issues/comments/42"
+	if strings.Join(requests, ",") != want {
+		t.Fatalf("unexpected GitHub calls: %v", requests)
+	}
+	body := reviewCommentBody(job, "completed", result)
+	if !strings.Contains(body, "    1. src/main.rs:3–4") || !strings.Contains(body, "\n    @someone <img>") {
+		t.Fatalf("expected findings rendered as plain code: %q", body)
+	}
+}
