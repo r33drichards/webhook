@@ -275,6 +275,23 @@ func (s *reviewService) work() {
 			continue
 		}
 		s.notifyReview(context.Background(), job, state, result)
+		if state == "completed" {
+			s.removeCompletedLabel(job)
+		}
+	}
+}
+
+func (s *reviewService) removeCompletedLabel(job reviewJob) {
+	if s.comments == nil {
+		return
+	}
+	var newest int64
+	err := s.db.QueryRow("SELECT MAX(id) FROM reviews WHERE repository = ? AND number = ?", job.repository, job.number).Scan(&newest)
+	if err == nil && newest == job.id {
+		err = s.comments.removeLabel(context.Background(), job, s.label)
+	}
+	if err != nil {
+		reviewLog.Printf("could not remove trigger label for review %d: %v", job.id, err)
 	}
 }
 

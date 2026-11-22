@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -62,6 +63,30 @@ func (c *reviewComments) send(ctx context.Context, job reviewJob, commentID int6
 		return 0, fmt.Errorf("GitHub returned no comment ID")
 	}
 	return comment.ID, nil
+}
+
+func (c *reviewComments) removeLabel(ctx context.Context, job reviewJob, label string) error {
+	endpoint := fmt.Sprintf("%s/repos/%s/issues/%d/labels/%s", c.api, job.repository, job.number, url.PathEscape(label))
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Accept", "application/vnd.github+json")
+	response, err := c.client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		return nil
+	case http.StatusNotFound:
+		// GitHub also returns 404 when the label has already been removed.
+		return nil
+	default:
+		return fmt.Errorf("GitHub label API returned HTTP %d", response.StatusCode)
+	}
 }
 
 func reviewCommentBody(job reviewJob, state, result string) string {
